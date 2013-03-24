@@ -1,0 +1,25 @@
+main:
+	begin
+		r1 := 1
+		r3 := r1 + 2
+		r2 := 7
+		r4 := 4
+		r5 := r1 + 3
+		r3 := r5 + 1
+		r5 := 2
+		r5 := 3
+		r5 := 1
+	end
+	
+teste2:
+	begin
+		rr1 := 1
+		rr3 := rr1 + 2
+		rr2 := 7
+		rr4 := 4
+		rr5 := rr1 + 3
+		rr3 := rr5 + 1
+		rr5 := 2
+		rr5 := 3
+		rr5 := 1
+	end

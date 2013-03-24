@@ -1,0 +1,23 @@
+sieve_of_erastosthenes:
+
+main:
+	begin
+start: 	total := 100
+		div := 1
+		
+L1: 	if div > 9 goto final
+		i := 100
+		
+L2:		r := i mod div
+		if r != 0 goto next
+		total := total - 1
+		
+next:	i := i - 1
+		if i = 0 goto next_div
+		goto L2
+
+next_div: div := div - 1
+		goto L1
+		
+final: return total
+	end

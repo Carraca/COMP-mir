@@ -1,0 +1,344 @@
+options {
+	LOOKAHEAD = 1;
+	DEBUG_PARSER = true;
+}
+
+PARSER_BEGIN(MIR_parser)
+package mir;
+import mir.Access_type;
+
+public class MIR_parser {}
+
+PARSER_END(MIR_parser)
+
+SKIP: {
+	" " | "\r" | "\t"
+}
+
+TOKEN: {
+ 	< IF_KEYWORD: "if" > |
+	< TRAP_KEYWORD: "trap" > |
+	< CALL_KEYWORD: "call" > |
+	< GOTO_KEYWORD: "goto" > |
+	< SEQUENCE_KEYWORD: "sequence" > |
+	< RETURN_KEYWORD: "return" > |
+	< RECEIVE_KEYWORD: "receive" > |
+	< BEGIN_KEYWORD: "begin" > |
+	< END_KEYWORD: "end" > |
+  	< LF: "\n" > |
+  	< PARAMETER_TYPE: "val" | "res" | "valres" | "ref"> |
+
+	< OPEN_PAREN: "(" > |
+	< CLOSE_PAREN: ")" > |
+
+	< ASSIGNMENT_OPERATOR: ":=" > |
+	< BINARY_OPERATOR:
+		"+" | "-" | "*" | "/" | "mod" | "min" | "max"|
+		"shl" | "shr" |
+		"shra" | "and" | "or" | "xor" // | "." | "*."
+	> |
+	< COMPARISON_OPERATOR: "=" | "!=" | "<" | "<=" | ">" | ">=" > |
+	< NEGATION_OPERATOR: "!" > |
+	< DEREFERENTIATION_OPERATOR: "$" > |
+	< UNARY_OPERATOR: "-" | < NEGATION_OPERATOR > | "addr" | ( "(" < IDENTIFIER > ")" ) | < DEREFERENTIATION_OPERATOR > > |
+	
+	< IDENTIFIER: ["A"-"Z","a"-"z"](["0"-"9","A"-"Z","a"-"z","_"])* > |
+
+	< LABEL: < IDENTIFIER > ":" (< LF >)* > |
+  	
+	< INTEGER: "0" | ("-")? ["1"-"9"](["0"-"9"])* | "0x" (["0"-"9"] | ["a"-"f"]  | ["A"-"F"])+ > |
+	< FLOAT_NUMBER: ("-")? (["0"-"9"])+ "." (["0"-"9"])+ ("E" ("-")? (["0"-"9"])+)? ("D")? > |
+	< BOOLEAN: "true" | "false"> |
+	
+	< COMMENT: "//" ~["\n"] > |
+	
+	< #RESERVED_WORDS:
+		< RECEIVE_KEYWORD > | < RETURN_KEYWORD > | < IF_KEYWORD > |
+		< TRAP_KEYWORD > | < CALL_KEYWORD > | < GOTO_KEYWORD > |
+		< SEQUENCE_KEYWORD > | < BEGIN_KEYWORD > | < END_KEYWORD >
+	>
+}
+
+void Parse_constant() #void : { Token t; } {
+    (
+		Parse_integer()
+		| t = < FLOAT_NUMBER >
+		{
+			jjtThis.value = t.image;
+			jjtThis.line_number = t.beginLine;
+		} #Float
+		| t = < BOOLEAN >
+		{
+			jjtThis.value = t.image;
+			jjtThis.line_number = t.beginLine;
+		} #Boolean
+    )
+}
+
+void Parse_integer() #Integer : { Token t; } {	t = < INTEGER >
+	{
+		jjtThis.value = t.image;
+		jjtThis.line_number = t.beginLine;
+	}
+}
+
+SimpleNode Parse_label(Access_type access_type) #Label : { Token t; }{
+	t = < LABEL >
+	{		jjtThis.value = t.image.substring(0, t.image.indexOf(":"));
+		jjtThis.line_number = t.beginLine;
+		jjtThis.access_type = access_type;
+		return jjtThis;
+	} 
+}
+
+SimpleNode Parse_variable(Access_type access_type) #Variable : { Token t; } {	t = < IDENTIFIER >
+	{	  	jjtThis.access_type = access_type;		jjtThis.value = t.image;
+		jjtThis.line_number = t.beginLine;
+		return jjtThis;
+	}
+}
+
+SimpleNode Program() : { SimpleNode n; boolean labeled; } {
+  	//FIXME lookahead sintactico
+  	{  		labeled = false;
+	}
+
+	(< LF >)*
+	
+  	(LOOKAHEAD(Parse_label(Access_type.WRITE) Parse_label(Access_type.WRITE))
+  	n = Parse_label(Access_type.WRITE)
+  	{
+  	  	labeled = true;		jjtThis.value = n.value;
+	}
+	(Program_unit())* 
+	| (Program_unit())*) < EOF >
+	
+	{
+	    if(labeled) {		    jjtThis.children[0] = null;
+		}
+				return jjtThis;
+	}
+}
+
+void Program_unit() : { Token t; SimpleNode n; boolean labeled; } {
+  	{
+  		labeled = false;
+	}
+	
+	(
+		n = Parse_label(Access_type.WRITE)
+		{			labeled = true;
+			jjtThis.value = n.value;
+		}
+	)?
+	t = < BEGIN_KEYWORD > (< LF >)*
+	MIR_instructions()
+	< END_KEYWORD > (< LF >)*
+
+	{		if(labeled) {			jjtThis.children[0] = null;
+		}
+		jjtThis.line_number = t.beginLine;
+	}
+}
+
+//void Jumpable() : {} {//	(< LABEL >)? (LOOKAHEAD(2) Program_unit() | Program())//}
+
+void MIR_instructions() #void : { Token t; } {
+	(
+		(Parse_label(Access_type.WRITE))?
+		MIR_instruction()
+	)*
+}
+
+void MIR_instruction() #void : {} {
+	(
+		Receive_instruction() | 
+		LOOKAHEAD(3) Assign_instruction() | 
+		Call_instruction() |
+		Goto_instruction() | 
+		If_instruction() |
+		Return_instruction() |
+		Sequence_instruction() |
+		< COMMENT > |
+		(< LF >)*
+		// |
+		//(< LABEL > MIRInstruction())
+	) (< LF >)+
+}
+
+void Receive_instruction() : { Token t, param, id; } {
+	t = < RECEIVE_KEYWORD >
+	Parse_variable(Access_type.WRITE)
+	< OPEN_PAREN >
+	param = < PARAMETER_TYPE >	{
+	  jjtThis.value = param.image;
+	  jjtThis.line_number = param.beginLine;	} #Parameter_type
+	< CLOSE_PAREN >
+	{	  jjtThis.line_number = t.beginLine;
+	}
+}
+
+void Conditional_assignment() #void : { Token t; } {	"(" t = < IDENTIFIER > ")" (Parse_variable(Access_type.READ) | Parse_constant())
+	{
+	 	jjtThis.access_type = Access_type.READ;		jjtThis.value = t.image;
+		jjtThis.line_number = t.beginLine;
+	} #Condition_variable
+}
+
+void Complex_variable(Access_type access_type) #void : { Token elem; boolean derefed; SimpleNode n; } {
+	{
+		derefed = false;
+	}
+	
+	(
+		< DEREFERENTIATION_OPERATOR >
+		{			derefed = true;
+		}
+	)?
+	n = Parse_variable(access_type)
+	{		if(derefed) {			n.derefed = true;
+		}
+	}
+	(
+		"." elem = < IDENTIFIER >
+		{			n.element = elem.image;
+		}
+	)?
+}
+
+void Assign_instruction() : { Token t; } { 
+	Complex_variable(Access_type.WRITE)
+	t = < ASSIGNMENT_OPERATOR >
+	(LOOKAHEAD(2)
+		Expression() |
+		Call_instruction() |
+		Conditional_assignment() |
+		Complex_variable(Access_type.READ)
+	)
+
+	{	  jjtThis.line_number = t.beginLine;
+	}
+}
+
+void Goto_instruction() : { Token t; } {
+	< GOTO_KEYWORD > t = < IDENTIFIER >
+	{		jjtThis.value = t.image;
+		jjtThis.line_number = t.beginLine;
+		jjtThis.access_type = Access_type.READ;
+	} #Label
+	
+	{		jjtThis.line_number = t.beginLine;
+	}
+}
+
+void If_instruction() : {Token t;} {
+	t = < IF_KEYWORD > Comparison_expression() 
+		(Goto_instruction() | Trap_instruction())
+	
+	{		jjtThis.line_number = t.beginLine;
+	}
+}
+
+void Trap_instruction() : { Token t; } {	< TRAP_KEYWORD > t = < INTEGER >
+	{
+		jjtThis.value = t.image;
+	}
+
+	{		jjtThis.line_number = t.beginLine;
+	}
+}
+
+void Call_instruction() : { Token t; } {
+	< CALL_KEYWORD > 
+	t = < IDENTIFIER > 
+	{
+		jjtThis.value = t.image;
+		jjtThis.line_number = t.beginLine;
+	}
+	< OPEN_PAREN > (Argument_list())? < CLOSE_PAREN >
+}
+
+void Argument_list() #void : {} {
+	Argument() (";" Argument())*
+}
+
+void Argument() : { Token var, type; } {
+	(
+		var = < IDENTIFIER >		{
+			jjtThis.access_type = Access_type.READ;
+			jjtThis.value = var.image;
+			jjtThis.line_number = var.beginLine;		} #Variable
+	| Parse_constant()) ","
+	type = < IDENTIFIER >
+	{
+		jjtThis.value = type.image;
+		jjtThis.line_number = type.beginLine;
+	} #Type}
+
+void Return_instruction() : { Token t, t_line; } {
+	t_line = < RETURN_KEYWORD > (t = < IDENTIFIER > 
+	{
+		jjtThis.value = t.image;
+		jjtThis.line_number = t.beginLine;
+		jjtThis.access_type = Access_type.READ;
+	} #Variable
+	| Parse_constant())?
+
+	{
+		jjtThis.line_number = t_line.beginLine;
+	}
+}
+
+void Sequence_instruction() : { Token t; } {
+	t = < SEQUENCE_KEYWORD >
+	{		jjtThis.line_number = t.beginLine;
+	}
+}
+
+void Expression() : { SimpleNode n; Token bin, un; } {
+	(
+		(Parse_variable(Access_type.READ) | Parse_constant())
+		(
+			(				bin = < BINARY_OPERATOR >
+				{
+					jjtThis.value = bin.image;
+					jjtThis.line_number = bin.beginLine;				} #Binary_operator
+			)
+
+			(Parse_variable(Access_type.READ) | Parse_constant())
+		)?
+	)
+	|
+	(
+		(
+			un = < UNARY_OPERATOR >
+			{
+				jjtThis.value = un.image;
+				jjtThis.line_number = un.beginLine;			} #Unary_operator
+		)
+
+		(Parse_variable(Access_type.READ) | Parse_constant())
+	)
+}
+
+void Comparison_expression() : { SimpleNode n; Token comp, neg; } {
+	LOOKAHEAD(2)
+	(Parse_variable(Access_type.READ) | Parse_constant())
+	(
+		comp = < COMPARISON_OPERATOR >
+		{
+			jjtThis.value = comp.image;
+			jjtThis.line_number = comp.beginLine;
+		}
+	)
+	(Parse_variable(Access_type.READ) | Parse_constant())
+	|
+	(
+		neg = < NEGATION_OPERATOR >
+		{
+			jjtThis.value = neg.image;
+			jjtThis.line_number = neg.beginLine;
+		}
+	)?
+	(Parse_variable(Access_type.READ) | Parse_constant())
+}
